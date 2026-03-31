@@ -6,24 +6,26 @@
 # If input_directory provided, use it otherwise if input_pattern provided,
 # use it, otherwise use input_samples.
 # ============================================================================
-sequana_wrappers: v23.12.5
 
-
-input_directory: /home/cokelaer/Work/github/sequana_bioconvert
-input_pattern: '*fastq.gz'
+input_directory: ''
+input_pattern: '*.fastq.gz'
 
 # ======================================= [apptainers] ======================
 #
 apptainers:
-  bioconvert: "https://zenodo.org/record/7704649/files/bioconvert_1.0.0.img"
+  #bioconvert: "https://zenodo.org/record/8078007/files/bioconvert_1.1.0.img"
+  bioconvert: "https://zenodo.org/record/19359689/files/bioconvert_1.2.0.img" 
   graphviz: "https://zenodo.org/record/7928262/files/graphviz_7.0.5.img"
 
 ##############################################################################
-# Your section
+# bioconvert section
 #
 # :Parameters:
 #
-# - options: string with any valid FastQC options
+# - command: one of the conversion commands (e.g. fastq2fasta, bam2sam, ...)
+# - input_extension: extension of input files (e.g. fastq.gz)
+# - output_extension: extension of output files (e.g. fasta.gz)
+# - method: optional method override (leave empty for default)
 bioconvert:
     command: fastq2fasta
     input_extension: fastq.gz
@@ -31,4 +33,3 @@ bioconvert:
     method: ''
     resources:
         mem: 4G
-

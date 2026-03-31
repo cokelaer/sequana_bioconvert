@@ -1,6 +1,6 @@
-import pkg_resources
-try:
-    version = pkg_resources.require("sequana_bioconvert")[0].version
-except:
-    version = ">=0.8.0"
+from importlib.metadata import PackageNotFoundError, version
 
+try:
+    version = version("sequana-bioconvert")
+except PackageNotFoundError:
+    version = "unknown"

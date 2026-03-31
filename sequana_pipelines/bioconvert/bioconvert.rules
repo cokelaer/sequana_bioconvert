@@ -1,78 +1,200 @@
-"""bioconvert pipeline
-
-Author: Thomas Cokelaer
-Affiliation: Institut Pasteur @ 2019
-
-This pipeline is part of Sequana software (sequana.readthedocs.io)
-
-snakemake -s bioconvert.rules --forceall --stats stats.txt --cores 4
-
-
-"""
+##############################################################################
+#
+#  Copyright (c) 2016-2021 - Sequana Dev Team (https://sequana.readthedocs.io)
+#
+#  Distributed under the terms of the 3-clause BSD license.
+#  The full license is in the LICENSE file, distributed with this software.
+#
+#  Website:       https://github.com/sequana/sequana
+#  Website:       https://github.com/sequana/bioconvert
+#  Documentation: http://sequana.readthedocs.io
+#  Documentation: https://github.com/sequana/bioconvert/README.rst
+##############################################################################
+"""bioconvert pipeline"""
 import glob
+import os
+from pathlib import Path
+
 from sequana_pipetools import PipelineManager
 
-# This must be defined before the include
+
 configfile: "config.yaml"
 
 
-# A convenient manager
 manager = PipelineManager("bioconvert", config, fastq=False)
 
 
 command = config["bioconvert"]["command"]
-inext = config["bioconvert"]['input_extension']
-outext = config["bioconvert"]['output_extension']
-method = config["bioconvert"]['method']
+inext = config["bioconvert"]["input_extension"]
+outext = config["bioconvert"]["output_extension"]
+method = config["bioconvert"]["method"]
 input_pattern = config["input_pattern"]
 
 
 filenames = glob.glob(config["input_directory"] + os.sep + input_pattern)
 
-samples = [Path(x).name.split(".")[0] for x in filenames]
+if not filenames:
+    raise ValueError(
+        "No files found in '{}' matching pattern '*.{}'. "
+        "Check --input-directory, --input-pattern and --input-ext.".format(
+            config["input_directory"], inext
+        )
+    )
+
+samples = [Path(x).name.removesuffix("." + inext) for x in filenames]
 
 
-# create symbolic links
-try:
-    os.mkdir("input")
-except:
-    pass
-
+# create symbolic links to input files
+os.makedirs("input", exist_ok=True)
 for filename in filenames:
-    try:
-        os.symlink(filename, "./input/{}".format(os.path.basename(filename)))
-    except:
-        pass
+    dest = "./input/{}".format(os.path.basename(filename))
+    if not os.path.exists(dest):
+        os.symlink(filename, dest)
 
 
-rule all:
-    input: ["output/{}.{}".format(x,outext) for x in samples]
+rule pipeline:
+    input:
+        ".sequana/rulegraph.svg",
+        "md5_input.txt",
+        "md5_output.txt",
+        ["output/{}.{}".format(x, outext) for x in samples],
 
-
-method = config["bioconvert"].get("method", "")
 
 rule bioconvert:
     input:
         "input/{sample}." + inext
     output:
         "output/{sample}." + outext
+    log:
+        "output/{sample}.log"
     params:
-        command= config['bioconvert']['command'],
-        method= f" --method {method}" if method else ""
+        command=config["bioconvert"]["command"],
+        method=" --method {}".format(method) if method else ""
     resources:
         **config["bioconvert"]["resources"]
     container:
-        config['apptainers']['bioconvert']
+        config["apptainers"]["bioconvert"]
     shell:
-        """
-           bioconvert {params.command} {input} {output} --verbosity ERROR --force {params.method}
-        """
+        manager.get_shell("bioconvert/run", "v1")
+
+
+def _write_md5(file_list, outfile):
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as temp:
+        tmpname = temp.name
+    shell("md5sum {} > {}".format(" ".join(file_list), tmpname))
+    with open(tmpname, "r") as fin, open(outfile, "w") as fout:
+        for line in fin.readlines():
+            checksum, path = line.split()
+            fout.write("{}   {}\n".format(checksum, path.split("/")[-1]))
+
+
+rule md5sum_input:
+    input: sorted(filenames)
+    output: "md5_input.txt"
+    run:
+        _write_md5(sorted(filenames), str(output))
+
+
+rule md5sum_output:
+    input: ["output/{}.{}".format(x, outext) for x in samples]
+    output: "md5_output.txt"
+    run:
+        _write_md5(list(input), str(output))
+
+
+rule rulegraph:
+    input: str(manager.snakefile)
+    output:
+        svg="rulegraph/rulegraph.dot"
+    params:
+        mapper={},
+        configname="config.yaml"
+    run:
+        manager.get_run("rulegraph/run", "v1")(input, output, params)
+
+
+rule dot2svg:
+    input:
+        "rulegraph/rulegraph.dot"
+    output:
+        ".sequana/rulegraph.svg"
+    container:
+        config["apptainers"]["graphviz"]
+    shell:
+        manager.get_shell("graphviz/dot2svg", "v1")
+
+
+localrules: rulegraph, dot2svg, md5sum_input, md5sum_output
+
 
 onsuccess:
-    shell("chmod -R g+w .")
+    from sequana.modules_report.summary import SequanaReport
+    from sequana import logger
+    from sequana_pipelines.bioconvert import version
+
+    logger.setLevel("INFO")
+
     manager.teardown()
-    print("Once done, please clean up the directory using\n'make clean'")
+
+    # Build a simple summary table
+    import pandas as pd
+    from sequana.utils.datatables_js import DataTable
+
+    rows = []
+    for sample in samples:
+        rows.append({
+            "Sample": sample,
+            "Input file": "input/{}.{}".format(sample, inext),
+            "Output file": "output/{}.{}".format(sample, outext),
+        })
+    df = pd.DataFrame(rows)
+
+    datatable = DataTable(df, "bioconvert", index=False)
+    datatable.datatable.datatable_options = {
+        "paging": "false",
+        "buttons": ["copy", "csv"],
+        "bSort": "true",
+        "dom": "BRSPfrti",
+    }
+    js = datatable.create_javascript_function()
+    htmltable = datatable.create_datatable()
+
+    df_general = pd.DataFrame({
+        "input format": inext,
+        "output format": outext,
+        "files converted": len(samples),
+        "sequana_bioconvert version": version,
+    }, index=["summary"])
+
+    datatable2 = DataTable(df_general.T, "general", index=True)
+    datatable2.datatable.datatable_options = {
+        "paging": "false",
+        "bFilter": "false",
+        "bInfo": "false",
+        "header": "false",
+        "bSort": "false",
+    }
+    js2 = datatable2.create_javascript_function()
+    htmltable2 = datatable2.create_datatable(style="width: 30%; float:left")
+
+    method_display = method.strip() if method.strip() else "default"
+    contents = """<h2>General information</h2>
+<p>This pipeline parallelises <a href="https://bioconvert.readthedocs.io">bioconvert</a>
+conversions across multiple files. The command used was <b>{command}</b> with method <b>{method}</b>.</p>
+<div style="float:left; width:35%">{js2} {htmltable2}</div>
+<div style="clear:both"></div>
+<hr>
+<h2>Converted files</h2>
+{js} {htmltable}
+<p>MD5 checksums: <a href="md5_input.txt">input files</a> &mdash; <a href="md5_output.txt">output files</a>.</p>
+""".format(command=command, method=method_display, js2=js2, htmltable2=htmltable2, js=js, htmltable=htmltable)
+
+    data = manager.getmetadata()
+    s = SequanaReport(data, intro=contents)
+
+    shell("rm -rf rulegraph input")
+    shell("chmod -R g+w .")
 
 onerror:
     manager.onerror()
-

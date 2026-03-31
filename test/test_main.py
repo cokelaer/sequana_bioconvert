@@ -15,7 +15,7 @@ sharedir = f"{test_dir}/data/"
 def test_standalone_subprocess():
     directory = tempfile.TemporaryDirectory()
     cmd = """sequana_bioconvert --input-directory {}
-            --input-pattern "*fastq.gz" --input-ext fastq.gz --output-ext fasta.gz
+            --input-ext fastq.gz --output-ext fasta.gz
             --working-directory {} --force --command fastq2fasta
           """.format(
         sharedir, directory.name
@@ -33,8 +33,31 @@ def test_standalone_script():
         "--working-directory",
         directory.name,
         "--force",
+        "--input-ext",
+        "fastq.gz",
+        "--output-ext",
+        "fasta.gz",
+        "--command",
+        "fastq2fasta",
+    ]
+
+    results = runner.invoke(main, args)
+    assert results.exit_code == 0
+
+
+def test_standalone_script_with_pattern():
+    """Test that --input-pattern further restricts file selection."""
+    directory = tempfile.TemporaryDirectory()
+
+    runner = CliRunner()
+    args = [
+        "--input-directory",
+        sharedir,
+        "--working-directory",
+        directory.name,
+        "--force",
         "--input-pattern",
-        '"*fastq.gz"',
+        "test_*",
         "--input-ext",
         "fastq.gz",
         "--output-ext",
@@ -50,13 +73,11 @@ def test_standalone_script():
 def test_full():
 
     with tempfile.TemporaryDirectory() as directory:
-        print(directory)
         wk = directory
 
         cmd = "sequana_bioconvert --input-directory {} "
-        cmd += "--working-directory {}  --force --command fastq2fasta"
-        cmd += '--input-pattern "*fastq.gz" --input-ext fastq.gz'
-        cmd += "--output-ext fasta.gz "
+        cmd += "--working-directory {}  --force --command fastq2fasta "
+        cmd += "--input-ext fastq.gz --output-ext fasta.gz"
         cmd = cmd.format(sharedir, wk)
         subprocess.call(cmd.split())
 
