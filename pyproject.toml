@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "sequana-bioconvert"
-version = "1.1.0"
+version = "1.2.0"
 description = "description: convert NGS format from one to another using bioconvert"
 authors = ["Sequana Team"]
 license = "BSD-3"

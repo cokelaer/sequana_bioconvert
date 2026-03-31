@@ -11,7 +11,6 @@
 #
 ##############################################################################
 import os
-import subprocess
 import sys
 
 import click_completion
@@ -27,8 +26,10 @@ help = init_click(
     NAME,
     groups={
         "Pipeline Specific": [
-            "--aligner-choice",
-            "--contaminant-file",
+            "--input-ext",
+            "--output-ext",
+            "--command",
+            "--method",
         ],
     },
 )
@@ -44,13 +45,6 @@ r = Registry()
 blog.level = "WARNING"
 commands = list(r.get_converters_names())
 
-methods = {}
-smethods = set()
-for command in r._fmt_registry.values():
-    methods[command.__name__.lower()] = command.available_methods
-    for x in command.available_methods:
-        smethods.add(x)
-
 
 @click.command(context_settings=help)
 @include_options_from(ClickSnakemakeOptions, working_directory=NAME)
@@ -59,9 +53,12 @@ for command in r._fmt_registry.values():
 @click.option(
     "--input-pattern",
     "input_pattern",
-    required=True,
+    default="*",
+    show_default=True,
     type=click.STRING,
-    help="""The input pattern that allows you to restrict the search more specifically (default is to take all files in the input directory""",
+    help="""Prefix glob pattern to restrict which files are picked up. Combined with
+        --input-ext to form the actual file pattern (e.g. '*' + 'fastq.gz' → '*.fastq.gz').
+        Useful when only a subset of files in the directory should be converted.""",
 )
 @click.option(
     "--input-directory",
@@ -94,20 +91,24 @@ for command in r._fmt_registry.values():
 @click.option(
     "--method",
     "method",
-    type=click.Choice(smethods),
+    type=click.STRING,
     default=None,
-    help="If you know bioconvert and method's name, you can set it here. This depends on the command used. Type 'bioconvert fastq-fasta --show--methods' to get the valid method for the command 'fastq2fasta' ",
+    help="Override the default conversion method for the chosen command. "
+    "Run 'bioconvert COMMAND --show-methods' to list valid methods.",
 )
 def main(**options):
     """
 
-    To convert a bunch of fastq files into fasta, initiate the pipeline using:
+    To convert a set of fastq.gz files into fasta.gz, run:
 
-        sequana_bioconvert --input-directory data/ --input-ext "fastq.gz" --output-ext "fasta.gz"
-            --use-apptainer --apptainer-prefix ~/images/ --command fastq2fasta --input-pattern "*"
+        sequana_bioconvert --input-directory data/ --input-ext fastq.gz --output-ext fasta.gz
+            --command fastq2fasta
 
         cd bioconvert
         sh bioconvert.sh
+
+    Use --input-pattern to restrict conversion to a subset of files, e.g. --input-pattern "sample_*".
+    Use --method to override the default conversion method, e.g. --method pysam.
 
     """
 
@@ -128,15 +129,17 @@ def main(**options):
     logger.setLevel(options.level)
 
     cfg.input_directory = os.path.abspath(options.input_directory)
-    cfg.input_pattern = options.input_pattern
-    cfg.bioconvert.method = options.method
+    cfg.input_pattern = options.input_pattern + "." + options.input_extension
+    cfg.bioconvert.method = options.method or ""
     cfg.bioconvert.command = options.command
     cfg.bioconvert.input_extension = options.input_extension
     cfg.bioconvert.output_extension = options.output_extension
 
+    manager.exists(cfg.input_directory)
+
     # finalise the command and save it; copy the snakemake. update the config
     # file and save it.
-    manager.teardown(check_input_files=False)
+    manager.teardown()
 
 
 if __name__ == "__main__":
